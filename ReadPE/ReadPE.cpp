@@ -20,8 +20,8 @@ struct RvaFoa {
 	DWORD FileSA;
 	DWORD FileSize;
 };
-typedef struct RvaFoa RvaFoa;
 
+typedef struct RvaFoa RvaFoa;
 HANDLE hFile = INVALID_HANDLE_VALUE;
 char* filename = nullptr;
 bool opt_interactive = false;
