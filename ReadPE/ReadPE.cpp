@@ -265,8 +265,9 @@ VOID show_iat()
 	{
 		LPCSTR name = ReadStringFromFile(rva2foa(pe_iat[i].Name + pe_nth.OptionalHeader.ImageBase));
 		if (name == NULL) continue;
-		printf("DLL Name: %s\n", name);
 		DWORD pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk + pe_nth.OptionalHeader.ImageBase);
+		printf("DLL Name: %s\n", name);
+		printf("INT FOA: 0x%x\n", pe_int_list_foa);
 		DWORD start = pe_int_list_foa;
 		DWORD block_size = 4;
 		while (true)
