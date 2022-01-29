@@ -18,4 +18,4 @@ rva: convert rva to foa
 
 iat: show IAT
 
-[GIF](https://raw.githubusercontent.com/zsy-arch/ReadPE/master/Animation.gif)
+![GIF](https://raw.githubusercontent.com/zsy-arch/ReadPE/master/Animation.gif)
