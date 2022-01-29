@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <cstring>
 #include <Windows.h>
-#include <vector>
+#include <string>
 #include <cmath>
 
 #define LOG_ERROR(x) {printf("ERROR: %s\n", x);}
@@ -24,7 +24,7 @@ typedef struct RvaFoa RvaFoa;
 
 HANDLE hFile = INVALID_HANDLE_VALUE;
 char* filename = nullptr;
-bool opt_rva = false;
+bool opt_interactive = false;
 RvaFoa* headers;
 IMAGE_DOS_HEADER pe_dh;
 NT_HEADER_TYPE pe_nth;
@@ -33,9 +33,12 @@ DWORD num_read;
 WORD num_sections;
 
 DWORD calc_alignment(DWORD size, DWORD alignment);
-DWORD rva2foa(DWORD rva, RvaFoa* headers, WORD size);
+DWORD rva2foa(DWORD rva);
 DWORD hex2int(char* str);
-void show_sections(RvaFoa* headers, WORD size);
+VOID show_sections();
+VOID show_iat();
+LPVOID ReadBytesFromFile(DWORD foa, DWORD size);
+LPCSTR ReadStringFromFile(DWORD foa);
 
 int main(const int argc, const char* argv[])
 {
@@ -47,9 +50,9 @@ int main(const int argc, const char* argv[])
 
 	for (int i = 1; i < argc; i++)
 	{
-		if (!stricmp("/rva", argv[i]))
+		if (!stricmp("/i", argv[i]))
 		{
-			opt_rva = true;
+			opt_interactive = true;
 		}
 		else
 		{
@@ -118,15 +121,11 @@ int main(const int argc, const char* argv[])
 		headers[i + 1].FileSize = calc_alignment(pe_sech[i].SizeOfRawData, pe_nth.OptionalHeader.FileAlignment);
 		headers[i + 1].MemSA = pe_nth.OptionalHeader.ImageBase + pe_sech[i].VirtualAddress;
 		headers[i + 1].MemSize = calc_alignment(pe_sech[i].SizeOfRawData, pe_nth.OptionalHeader.SectionAlignment);
-		/*if (headers[i].MemSize == 0)
-		{
-			headers[i].MemSize = headers[i + 1].MemSA - headers[i].MemSA;
-		}*/
 	}
 
-	show_sections(headers, num_sections + 1);
+	show_sections();
 
-	if (opt_rva)
+	if (opt_interactive)
 	{
 		while (true)
 		{
@@ -140,30 +139,39 @@ int main(const int argc, const char* argv[])
 			}
 			else if (!strcmp(tmp, "s"))
 			{
-				show_sections(headers, num_sections + 1);
+				show_sections();
+				continue;
+			}
+			else if (!strcmp(tmp, "iat"))
+			{
+				show_iat();
+			}
+			else if (!strcmp(tmp, "rva"))
+			{
+				scanf("%s", tmp);
+				DWORD hex = hex2int(tmp);
+				if (hex)
+				{
+					if (hex >= pe_nth.OptionalHeader.ImageBase)
+					{
+						printf("RVA: 0x%x, FOA: 0x%x\n",
+							hex,
+							rva2foa(hex)
+						);
+
+					}
+					else
+					{
+						printf("RVA: 0x%x, FOA: 0x%x\n",
+							hex + pe_nth.OptionalHeader.ImageBase,
+							rva2foa(hex + pe_nth.OptionalHeader.ImageBase)
+						);
+					}
+				}
 				continue;
 			}
 
-			DWORD hex = hex2int(tmp);
-			if (hex)
-			{
-				if (hex >= pe_nth.OptionalHeader.ImageBase)
-				{
-					printf("RVA: 0x%x, FOA: 0x%x\n",
-						hex,
-						rva2foa(hex , headers, num_sections + 1)
-					);
 
-				}
-				else
-				{
-					printf("RVA: 0x%x, FOA: 0x%x\n",
-						hex + pe_nth.OptionalHeader.ImageBase,
-						rva2foa(hex + pe_nth.OptionalHeader.ImageBase, headers, num_sections + 1)
-					);
-				}
-			}
-			else break;
 		}
 	}
 	return 0;
@@ -176,9 +184,9 @@ DWORD calc_alignment(DWORD size, DWORD alignment)
 	return i * alignment;
 }
 
-DWORD rva2foa(DWORD rva, RvaFoa* headers, WORD size)
+DWORD rva2foa(DWORD rva)
 {
-	for (WORD i = 0; i < size; i++)
+	for (WORD i = 0; i < num_sections + 1; i++)
 	{
 		if (rva >= headers[i].MemSA && rva < headers[i].MemSA + headers[i].MemSize)
 		{
@@ -223,9 +231,9 @@ DWORD hex2int(char* str)
 	return result;
 }
 
-void show_sections(RvaFoa* headers, WORD size)
+VOID show_sections()
 {
-	for (WORD i = 0; i < size; i++)
+	for (WORD i = 0; i < num_sections + 1; i++)
 	{
 		printf("[Section %s]\n", headers[i].Name);
 		printf("\tFile SA: 0x%x, Size: 0x%x\n\tMem SA: 0x%x, Size: 0x%x\n",
@@ -235,4 +243,75 @@ void show_sections(RvaFoa* headers, WORD size)
 			headers[i].MemSize
 		);
 	}
+}
+
+VOID show_iat()
+{
+	DWORD dwIatRva = pe_nth.OptionalHeader.DataDirectory[1].VirtualAddress;
+	DWORD dwIatSize = pe_nth.OptionalHeader.DataDirectory[1].Size;
+	DWORD dwIatFoa = rva2foa(dwIatRva + pe_nth.OptionalHeader.ImageBase);
+	DWORD dwIatLen = dwIatSize / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+	printf("IAT SA: 0x%x, FOA: 0x%x\n", dwIatRva, dwIatFoa);
+	SetFilePointer(hFile, dwIatFoa, NULL, FILE_BEGIN);
+	LPVOID lpvBuf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwIatSize);
+	ReadFile(hFile, lpvBuf, dwIatSize, &num_read, NULL);
+	if (num_read != dwIatSize)
+	{
+		printf("ERROR: cannot read iat\n");
+		return;
+	}
+	PIMAGE_IMPORT_DESCRIPTOR pe_iat = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(lpvBuf);
+	for (DWORD i = 0; i < dwIatLen; i++)
+	{
+		LPCSTR name = ReadStringFromFile(rva2foa(pe_iat[i].Name + pe_nth.OptionalHeader.ImageBase));
+		if (name == NULL) continue;
+		printf("DLL Name: %s\n", name);
+		DWORD pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk + pe_nth.OptionalHeader.ImageBase);
+		DWORD start = pe_int_list_foa;
+		DWORD block_size = 4;
+		while (true)
+		{
+			DWORD iin_rva = *reinterpret_cast<DWORD*>(ReadBytesFromFile(start, block_size));
+			if (iin_rva == 0) break;
+			DWORD iin_foa = rva2foa(iin_rva + pe_nth.OptionalHeader.ImageBase);
+			DWORD proc_name_foa = iin_foa + 2;
+			LPCSTR proc_name = ReadStringFromFile(proc_name_foa);
+			printf("\t%s\n", proc_name);
+			start += block_size;
+		}	
+	}
+}
+
+LPCSTR ReadStringFromFile(DWORD foa)
+{
+	if (foa == 0) return NULL;
+	CHAR tmp;
+	SetFilePointer(hFile, foa, NULL, FILE_BEGIN);
+	std::string str;
+	while (1)
+	{
+		ReadFile(hFile, &tmp, sizeof(tmp), &num_read, NULL);
+		if (num_read == 0 || tmp == '\0') break;
+		str += *reinterpret_cast<char*>(&tmp);
+	}
+	if (!str.empty()) 
+	{
+		CHAR* result = (CHAR*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, str.size() + 16);
+		CopyMemory(result, str.c_str(), str.size());
+		return result;
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+LPVOID ReadBytesFromFile(DWORD foa, DWORD size)
+{
+	if (foa == 0) return NULL;
+	SetFilePointer(hFile, foa, NULL, FILE_BEGIN);
+	LPVOID lpvBuf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+	ReadFile(hFile, lpvBuf, size, &num_read, NULL);
+	if (num_read == 0) return NULL;
+	return lpvBuf;
 }
