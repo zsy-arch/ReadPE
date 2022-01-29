@@ -276,7 +276,7 @@ VOID show_iat()
 			DWORD iin_foa = rva2foa(iin_rva + pe_nth.OptionalHeader.ImageBase);
 			DWORD proc_name_foa = iin_foa + 2;
 			LPCSTR proc_name = ReadStringFromFile(proc_name_foa);
-			printf("\t%s\n", proc_name);
+			printf("\t%s [FOA: 0x%x]\n", proc_name, proc_name_foa);
 			start += block_size;
 		}	
 	}
