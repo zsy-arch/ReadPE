@@ -15,15 +15,17 @@
 
 #if defined(_WIN64)
 #define ADDR_TYPE ULONGLONG
+#define FMT_HEX "llx"
 #elif defined(_WIN32)
 #define ADDR_TYPE DWORD
+#define FMT_HEX "x"
 #endif
 
 struct RvaFoa {
 	char* Name;
-	DWORD MemSA;
+	ADDR_TYPE MemSA;
 	DWORD MemSize;
-	DWORD FileSA;
+	ADDR_TYPE FileSA;
 	DWORD FileSize;
 };
 
@@ -39,12 +41,12 @@ DWORD num_read;
 WORD num_sections;
 
 DWORD calc_alignment(DWORD size, DWORD alignment);
-DWORD rva2foa(DWORD rva);
-DWORD hex2int(char* str);
+ADDR_TYPE rva2foa(ADDR_TYPE rva);
+ADDR_TYPE hex2int(char* str);
 VOID show_sections();
 VOID show_iat();
-LPVOID ReadBytesFromFile(DWORD foa, DWORD size);
-LPCSTR ReadStringFromFile(DWORD foa);
+LPVOID ReadBytesFromFile(ADDR_TYPE foa, DWORD size);
+LPCSTR ReadStringFromFile(ADDR_TYPE foa);
 
 int main(const int argc, const char* argv[])
 {
@@ -155,10 +157,10 @@ int main(const int argc, const char* argv[])
 			else if (!strcmp(tmp, "rva"))
 			{
 				scanf("%s", tmp);
-				DWORD hex = hex2int(tmp);
+				ADDR_TYPE hex = hex2int(tmp);
 				if (hex)
 				{
-					printf("RVA: 0x%x, FOA: 0x%x\n",
+					printf("RVA: 0x%" FMT_HEX ", FOA: 0x%" FMT_HEX "\n",
 						hex,
 						rva2foa(hex)
 					);
@@ -179,7 +181,7 @@ DWORD calc_alignment(DWORD size, DWORD alignment)
 	return i * alignment;
 }
 
-DWORD rva2foa(DWORD rva)
+ADDR_TYPE rva2foa(ADDR_TYPE rva)
 {
 	for (WORD i = 0; i < num_sections + 1; i++)
 	{
@@ -191,7 +193,7 @@ DWORD rva2foa(DWORD rva)
 	return 0xffffffff;
 }
 
-DWORD hex2int(char* str)
+ADDR_TYPE hex2int(char* str)
 {
 	DWORD result = 0;
 	int bound = 0;
@@ -231,7 +233,7 @@ VOID show_sections()
 	for (WORD i = 0; i < num_sections + 1; i++)
 	{
 		printf("[Section %s]\n", headers[i].Name);
-		printf("\tFile SA: 0x%x, Size: 0x%x\n\tMem SA: 0x%x, Size: 0x%x\n",
+		printf("\tFile SA: 0x%" FMT_HEX ", Size: 0x%x""\n\tMem SA: 0x%" FMT_HEX ", Size: 0x%x""\n",
 			headers[i].FileSA,
 			headers[i].FileSize,
 			headers[i].MemSA,
@@ -242,11 +244,11 @@ VOID show_sections()
 
 VOID show_iat()
 {
-	DWORD dwIatRva = pe_nth.OptionalHeader.DataDirectory[1].VirtualAddress;
+	ADDR_TYPE dwIatRva = pe_nth.OptionalHeader.DataDirectory[1].VirtualAddress;
 	DWORD dwIatSize = pe_nth.OptionalHeader.DataDirectory[1].Size;
-	DWORD dwIatFoa = rva2foa(dwIatRva);
+	ADDR_TYPE dwIatFoa = rva2foa(dwIatRva);
 	DWORD dwIatLen = dwIatSize / sizeof(IMAGE_IMPORT_DESCRIPTOR);
-	printf("IAT SA: 0x%x, FOA: 0x%x\n", dwIatRva, dwIatFoa);
+	printf("IAT SA: 0x%" FMT_HEX ", FOA: 0x%" FMT_HEX "\n", dwIatRva, dwIatFoa);
 	SetFilePointer(hFile, dwIatFoa, NULL, FILE_BEGIN);
 	LPVOID lpvBuf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwIatSize);
 	ReadFile(hFile, lpvBuf, dwIatSize, &num_read, NULL);
@@ -260,25 +262,25 @@ VOID show_iat()
 	{
 		LPCSTR name = ReadStringFromFile(rva2foa(pe_iat[i].Name));
 		if (name == NULL) continue;
-		DWORD pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk);
+		ADDR_TYPE pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk);
 		printf("DLL Name: %s\n", name);
-		printf("INT FOA: 0x%x\n", pe_int_list_foa);
-		DWORD start = pe_int_list_foa;
+		printf("INT FOA: 0x%" FMT_HEX "\n", pe_int_list_foa);
+		ADDR_TYPE start = pe_int_list_foa;
 		DWORD block_size = sizeof(ADDR_TYPE);
 		while (true)
 		{
-			DWORD iin_rva = *reinterpret_cast<DWORD*>(ReadBytesFromFile(start, block_size));
+			ADDR_TYPE iin_rva = *reinterpret_cast<ADDR_TYPE*>(ReadBytesFromFile(start, block_size));
 			if (iin_rva == 0) break;
-			DWORD iin_foa = rva2foa(iin_rva);
-			DWORD proc_name_foa = iin_foa + 2;
+			ADDR_TYPE iin_foa = rva2foa(iin_rva);
+			ADDR_TYPE proc_name_foa = iin_foa + 2;
 			LPCSTR proc_name = ReadStringFromFile(proc_name_foa);
-			printf("\t%s [FOA: 0x%x]\n", proc_name, proc_name_foa);
+			printf("\t%s [FOA: 0x%" FMT_HEX "]\n", proc_name, proc_name_foa);
 			start += block_size;
 		}
 	}
 }
 
-LPCSTR ReadStringFromFile(DWORD foa)
+LPCSTR ReadStringFromFile(ADDR_TYPE foa)
 {
 	if (foa == 0) return NULL;
 	CHAR tmp;
@@ -302,7 +304,7 @@ LPCSTR ReadStringFromFile(DWORD foa)
 	}
 }
 
-LPVOID ReadBytesFromFile(DWORD foa, DWORD size)
+LPVOID ReadBytesFromFile(ADDR_TYPE foa, DWORD size)
 {
 	if (foa == 0) return NULL;
 	SetFilePointer(hFile, foa, NULL, FILE_BEGIN);
