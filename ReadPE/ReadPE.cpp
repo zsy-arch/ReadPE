@@ -13,6 +13,12 @@
 #define NT_HEADER_TYPE IMAGE_NT_HEADERS32
 #endif
 
+#if defined(_WIN64)
+#define ADDR_TYPE ULONGLONG
+#elif defined(_WIN32)
+#define ADDR_TYPE DWORD
+#endif
+
 struct RvaFoa {
 	char* Name;
 	DWORD MemSA;
@@ -109,7 +115,7 @@ int main(const int argc, const char* argv[])
 	strcpy(headers[0].Name, "peheader");
 	headers[0].FileSA = 0;
 	headers[0].FileSize = calc_alignment(pe_nth.OptionalHeader.SizeOfHeaders, pe_nth.OptionalHeader.FileAlignment);
-	headers[0].MemSA = pe_nth.OptionalHeader.ImageBase;
+	headers[0].MemSA = 0;
 	headers[0].MemSize = calc_alignment(pe_nth.OptionalHeader.SizeOfHeaders, pe_nth.OptionalHeader.SectionAlignment);
 
 	for (WORD i = 0; i < num_sections; i++)
@@ -119,7 +125,7 @@ int main(const int argc, const char* argv[])
 		headers[i + 1].Name[8] = 0;
 		headers[i + 1].FileSA = headers[i].FileSA + headers[i].FileSize;
 		headers[i + 1].FileSize = calc_alignment(pe_sech[i].SizeOfRawData, pe_nth.OptionalHeader.FileAlignment);
-		headers[i + 1].MemSA = pe_nth.OptionalHeader.ImageBase + pe_sech[i].VirtualAddress;
+		headers[i + 1].MemSA = pe_sech[i].VirtualAddress;
 		headers[i + 1].MemSize = calc_alignment(pe_sech[i].SizeOfRawData, pe_nth.OptionalHeader.SectionAlignment);
 	}
 
@@ -152,21 +158,10 @@ int main(const int argc, const char* argv[])
 				DWORD hex = hex2int(tmp);
 				if (hex)
 				{
-					if (hex >= pe_nth.OptionalHeader.ImageBase)
-					{
-						printf("RVA: 0x%x, FOA: 0x%x\n",
-							hex,
-							rva2foa(hex)
-						);
-
-					}
-					else
-					{
-						printf("RVA: 0x%x, FOA: 0x%x\n",
-							hex + pe_nth.OptionalHeader.ImageBase,
-							rva2foa(hex + pe_nth.OptionalHeader.ImageBase)
-						);
-					}
+					printf("RVA: 0x%x, FOA: 0x%x\n",
+						hex,
+						rva2foa(hex)
+					);
 				}
 				continue;
 			}
@@ -249,7 +244,7 @@ VOID show_iat()
 {
 	DWORD dwIatRva = pe_nth.OptionalHeader.DataDirectory[1].VirtualAddress;
 	DWORD dwIatSize = pe_nth.OptionalHeader.DataDirectory[1].Size;
-	DWORD dwIatFoa = rva2foa(dwIatRva + pe_nth.OptionalHeader.ImageBase);
+	DWORD dwIatFoa = rva2foa(dwIatRva);
 	DWORD dwIatLen = dwIatSize / sizeof(IMAGE_IMPORT_DESCRIPTOR);
 	printf("IAT SA: 0x%x, FOA: 0x%x\n", dwIatRva, dwIatFoa);
 	SetFilePointer(hFile, dwIatFoa, NULL, FILE_BEGIN);
@@ -263,23 +258,23 @@ VOID show_iat()
 	PIMAGE_IMPORT_DESCRIPTOR pe_iat = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(lpvBuf);
 	for (DWORD i = 0; i < dwIatLen; i++)
 	{
-		LPCSTR name = ReadStringFromFile(rva2foa(pe_iat[i].Name + pe_nth.OptionalHeader.ImageBase));
+		LPCSTR name = ReadStringFromFile(rva2foa(pe_iat[i].Name));
 		if (name == NULL) continue;
-		DWORD pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk + pe_nth.OptionalHeader.ImageBase);
+		DWORD pe_int_list_foa = rva2foa(pe_iat[i].OriginalFirstThunk);
 		printf("DLL Name: %s\n", name);
 		printf("INT FOA: 0x%x\n", pe_int_list_foa);
 		DWORD start = pe_int_list_foa;
-		DWORD block_size = 4;
+		DWORD block_size = sizeof(ADDR_TYPE);
 		while (true)
 		{
 			DWORD iin_rva = *reinterpret_cast<DWORD*>(ReadBytesFromFile(start, block_size));
 			if (iin_rva == 0) break;
-			DWORD iin_foa = rva2foa(iin_rva + pe_nth.OptionalHeader.ImageBase);
+			DWORD iin_foa = rva2foa(iin_rva);
 			DWORD proc_name_foa = iin_foa + 2;
 			LPCSTR proc_name = ReadStringFromFile(proc_name_foa);
 			printf("\t%s [FOA: 0x%x]\n", proc_name, proc_name_foa);
 			start += block_size;
-		}	
+		}
 	}
 }
 
@@ -295,7 +290,7 @@ LPCSTR ReadStringFromFile(DWORD foa)
 		if (num_read == 0 || tmp == '\0') break;
 		str += *reinterpret_cast<char*>(&tmp);
 	}
-	if (!str.empty()) 
+	if (!str.empty())
 	{
 		CHAR* result = (CHAR*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, str.size() + 16);
 		CopyMemory(result, str.c_str(), str.size());
